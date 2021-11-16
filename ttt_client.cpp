@@ -1,12 +1,13 @@
-#include "helpers.hpp"
+#include "TTTNET.hpp"
 #include <iostream>
 
+bool verbose = 0;
 
 // so we know how to interpret server messages (type-length-data)
-enum SERVER_TO_CLIENT_TYPES {REQUESTING_TAG = 1, REQUESTING_MOVE};
+enum SERVER_TO_CLIENT_TYPES {REQUESTING_TAG = 1, REQUESTING_MOVE, SENDING_MSG };
 
 // so we can send our messages to the server (type-length-data)
-enum CLIENT_TO_SERVER_TYPES {SEND_TAG = 1, SEND_MOVE, TERMINATED = 200 };
+enum CLIENT_TO_SERVER_TYPES {SEND_TAG = 1, SEND_MOVE, TERMINATED = EOF };
 
 // call to connect to TTT server given a ip and port.
 // exits program upon failure to create a socket or connect to server.
@@ -23,7 +24,6 @@ unsigned convert_to_unsigned(std::string s);
 // until int is entered, or EOF; [lower...upper] inclusive
 u_int32_t get_board_position(unsigned lower, unsigned upper);
 
-
 int main(int argc, char * argv[]) 
 {
     // defaults for connecting to the server
@@ -35,6 +35,12 @@ int main(int argc, char * argv[])
         TTT_ip = argv[1]; // should be alterantive ip
         if(argc > 2)
             TTT_port = argv[2]; // should be alternative port
+    }
+
+    // scans for "verbose" argument
+    for(unsigned i = 0; i < argc; i++)
+    {
+        if ( strcmp("-v", argv[i]) ) v = true;
     }
 
     SOCKET server = connect_to_ttt_server(TTT_ip, TTT_port);
@@ -117,6 +123,20 @@ int main(int argc, char * argv[])
                 if (move_from_player == EOF) break; // from loop, end program
                 if (Send_Move(move_from_player-1, server)) break; // from loop, end program
                 //user options [1...9] - 1 --> indexing [0..8]
+            }
+
+            if (server_msg.type == SERVER_TO_CLIENT_TYPES::SENDING_MSG)
+            {
+                char buff[256];
+                memset(buff, 0, 256); // zero out
+                // guaranteed null termination since TYPE_LENGTH_DATA::length < 256
+
+                // converting to ASCII
+                for(u_int8_t i = 0; i < server_msg.length; i++) buff[i] = char(server_msg.payload[i]);
+
+                std::cout << "Message from server:\n";
+                std::cout << buff << std::endl; // display message from server (typically TTT board)
+                std::cout << "-------------------\n";
             }
 
             std::cout << "finished reading from server\n";

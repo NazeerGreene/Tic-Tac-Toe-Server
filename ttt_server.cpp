@@ -2,34 +2,37 @@
 //IPv4 only for now
 //does not handle ctrl-D, use ctrl-C to terminate session
 
-#include "helpers.hpp"
+#include "TTTNET.hpp" /* for networking */
+#include "TTT.hpp"     /* for the TTT game itself */
 #include <iostream>
 #include <string>
+#include <random>      /* for the robot (opponent) */
 
-#define PACKET_MSG_SIZE 50
-
-// Game states for the server depending on the connection with the client
-enum STATES { LISTENING, ACCEPTING, ESTABLISHED, LOST };
 
 // types for communicating with the client (type-length-data)
-enum SERVER_TO_CLIENT_TYPES { REQUEST_TAG = 1, REQUEST_MOVE };
+enum SERVER_TO_CLIENT_TYPES { REQUEST_TAG = 1, REQUEST_MOVE, SEND_MSG };
 
-// types to interpret messages from player (type-length-data)
+// types to interpret messages from client (type-length-data)
 enum CLIENT_TO_SERVER_TYPES { RECEIVING_TAG = 1, RECEIVING_MOVE, TERMINATED = 200 };
 
-// create and bind socket to port
+// create and bind socket to local port; exits on failure;
+// purpose: to generate socket for listening
 SOCKET bind_server_and_get_listen_socket(const char *port);
 
-// blocking; wait to a client to connect, print out client info (IP addr)
-// and then return
+// wait to a client to connect; blocking 
+// print out client info (IP addr) and then return
 SOCKET wait_for_client(SOCKET listener);
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa); // provided by Beej's Networking Guide
 
-// request move from player, blocking
+// request move from player; blocking
+// -2   message too long, must be less than 256 characters
+// EOF  connection with client closed
 int32_t Request_Move(SOCKET client, std::string msg);
 
+// send a message to the client; non-blocking; 0 on success
+bool send_msg_to_client(SOCKET client, std::string msg);
 
 int main() 
 {
@@ -38,16 +41,6 @@ int main()
 
     SOCKET socket_listen = bind_server_and_get_listen_socket(port);
     SOCKET client = 0;
-
-    //listening for incoming connections
-    printf("Listening...\n");
-
-    /* we only want one client at a time */
-    if (listen(socket_listen, 0) < 0) 
-    {
-        std::cerr << "listen() failed. " << GETSOCKETERRNO() << '\n';
-        exit(EXIT_FAILURE);
-    }
    
     /*
         There should be at most 2 sockets to listen for:
@@ -62,10 +55,33 @@ int main()
     SOCKET max_socket = STDIN_FILENO;
 
 //---------------------------- FINISHED INIT -----------------------------
-    // now we listen for incoming connections
-    STATES STATE = LISTENING;
+//---------------------------- INITIALIZING THE GAME ---------------------------
+    GAMESTATE game{
+        .player_char = "",
+        .opp_char = "",
+        .empty_space = "",
+        .turns_left = 9
+    };
 
-    while(true) 
+    // initialize the board decorators with default characters
+    TTT_default_board_decorators(game.player_char, game.opp_char, game.empty_space);
+
+    // fill the board with initial 
+    game.board.fill(game.empty_space);
+    game.is_player_turn = true;
+    
+    //next 2 lines from https://zhang-xiao-mu.blog/2019/11/02/random-engine-in-modern-c/
+    //seed + engine necessary to produce pseudo-random numbers for robot player
+    unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
+    std::default_random_engine engine(seed);
+
+    //store winner character 
+    //[options: player char, opponent char, none ("")]
+    std::string winner{""};
+    std::string text{""}; /* the text we'll send to the player */
+//------------------------ FINISHED INITIALIZING THE GAME --------------------------
+
+    while(true) // while loop purpose: reading from stdin, client; mananging the game
     {
         reads = master;
         struct timeval timeout { .tv_sec = 0 , .tv_usec = 500000 /*microseconds*/ }; // 0.5 seconds
@@ -103,22 +119,61 @@ int main()
             continue;
         }
         
-        //-------------------------------- GAME STATES ---------------------------------
-        
-        int32_t player_move = Request_Move(client, "XXXXXXXXX");
-        if (player_move == EOF) // connection lost
-        {
-            shutdown(client, 2); // send client the FIN flag
-            close(client);       // we no longer need connection
-            FD_CLR(client, &master); // we no longer need to check for
-            max_socket = STDIN_FILENO;
-            client = 0; // wait for a new client
-        } else {
-            std::cout << "Player Move: " << player_move << std::endl;
-            //STATE = LOST;
-        }
+        //----------------------------------- GAME  -------------------------------------
+        if (game.turns_left == 9) // new game
+            text = "\nNew Game!\n";
 
-    //----------------------------- FINISHED GAME STATES ---------------------------------
+        if (game.is_player_turn)
+        {
+            text += valid_spaces + format_board(game);
+            int32_t player_move_ = Request_Move(client, text); // BLOCKING
+            text.clear();
+            std::cout << "[PLAYER] move: " << (player_move_ == EOF ? "EOF" : std::to_string(char(player_move_))) << std::endl;
+            if (player_move_ == EOF) // connection lost
+            {
+                shutdown(client, 2); // send client the FIN flag
+                close(client);       // we no longer need connection
+                FD_CLR(client, &master); // we no longer need to check for
+                max_socket = STDIN_FILENO;
+                client = 0;         // wait for a new client
+                clear_board(game); // restart game
+                text.clear();
+            } else {
+                player_move(player_move_, game); // put player move onto board
+            }
+        } else {
+            //generates "move" in [0..8] 
+            auto move = engine() % 9;
+            std::cout << "[OPPONENT] move: " << move << std::endl;
+            //opponent attempts to occupy spot
+            robot_move(move, game);
+            std::cout << format_board(game) << std::endl;
+        } // if (game.is_player_turn)
+
+        winner = check_for_win(game);
+        std::cout << winner << std::endl;
+        
+        if (winner == "") // no winner
+        {
+            if (game.turns_left == 0) // and game over
+            {
+                text = "It's a draw!\n" + format_board(game);
+                std::cout << text;   
+                send_msg_to_client(client, text);
+                clear_board(game);   //restart game
+                text.clear();
+            }
+        } else { // there is a winner
+            text = "\n\n~~~Player " + 
+            (winner == game.player_char ? game.player_char : game.opp_char) + 
+            " won!~~~\n";
+
+            std::cout << text;
+            send_msg_to_client(client, text);
+            clear_board(game); // restart game
+            text.clear();
+        } // if (winner == "") 
+        //----------------------------- FINISHED THE GAME --------------------------------
     } //while
 
     std::cout << "Closing listening socket...\n";
@@ -130,9 +185,6 @@ int main()
 } //main
 
 SOCKET bind_server_and_get_listen_socket(const char *listening_port)
-// create the socket for the server to listen on and bind it 
-// to the listening port (listening_port).
-// returns the socket on success, exits on failure.
 {
     //setting up our configurations
     std::cout << "Configuring local address...\n";
@@ -157,7 +209,7 @@ SOCKET bind_server_and_get_listen_socket(const char *listening_port)
         exit(EXIT_FAILURE);
     }
 
-    //binding socket to a local address
+    // binding socket to a local address
     std::cout << "Binding socket to local address...\n";
     if (bind(socket_listen,
                 bind_address->ai_addr, 
@@ -167,8 +219,18 @@ SOCKET bind_server_and_get_listen_socket(const char *listening_port)
         exit(EXIT_FAILURE);
     }
 
-    //free linked list
+    // free linked list
     freeaddrinfo(bind_address);
+
+    // listening for incoming connections
+    std::cout << "Listening...\n";
+
+    // we only want one client at a time
+    if (listen(socket_listen, 0) < 0) 
+    {
+        std::cerr << "listen() failed. " << GETSOCKETERRNO() << '\n';
+        exit(EXIT_FAILURE);
+    }
 
     return socket_listen;
 }
@@ -192,7 +254,7 @@ SOCKET wait_for_client(SOCKET listener)
 
     while (!client)
     {
-        std::cout << "Waiting for connections...\n";
+        std::cout << "\n---> WAITING FOR CONNECTIONS...";
 
         client = accept(listener, (struct sockaddr *)&client_sockaddr, &client_size);
 
@@ -204,7 +266,7 @@ SOCKET wait_for_client(SOCKET listener)
 
         //covert network to presentation (easy read)
         inet_ntop(AF_INET, &(client_sockaddr.sin_addr), ipv4, INET_ADDRSTRLEN);
-        std::cout << "server: got connection from " << ipv4 << '\n';
+        std::cout << "NEW CONNECTION FROM " << ipv4 << '\n';
     } // while (!client)
 
     return client;
@@ -269,4 +331,41 @@ int32_t Request_Move(SOCKET client, std::string msg)
     }
 
     return static_cast<int32_t>(client_msg.payload[0]); // the move should be the first element
+}
+
+bool send_msg_to_client(SOCKET client, std::string msg)
+{
+    TYPE_LENGTH_DATA server_msg;
+    memset(&server_msg, 0, sizeof(server_msg)); // zero out
+
+    static int loop = 0; // for debugging
+
+    // so that the client knows what the 
+    // server is requesting
+    server_msg.type = SERVER_TO_CLIENT_TYPES::SEND_MSG;
+
+    // to reduce the size in case c++11 allocated more than necessary
+    msg.shrink_to_fit();
+
+    u_int8_t length = msg.length();
+
+    if (length > 255)
+    {
+        std::cerr << "Error: MSG length too long [" 
+        << length << "]\n";
+
+        return 1;
+    }
+
+    server_msg.length = length;
+
+    // copying msg into packet.msg buffer
+    for(u_int8_t i = 0; i < length; i++)    server_msg.payload[i] = msg[i];
+
+    std::cout << "packet " << loop++ << "\n[\n\t" << "type\tSEND_MSG\n\t" << "length  " << std::to_string(length) <<
+    "\n\tpayload \"" << msg << "\"\n]" << std::endl;
+
+    int bytes_sent = send(client, &server_msg, sizeof(server_msg), 0);
+
+    return 0;
 }

@@ -1,6 +1,5 @@
 #include "TTT.hpp"
 
-
 void TTT_default_board_decorators(std::string& player_char, std::string& opp_char, std::string& empty_space)
 {
     player_char = DEFAULT_PLAYER_CHAR;
@@ -67,7 +66,7 @@ bool robot_move(unsigned move, GAMESTATE& game)
     return false;
 }
 
-void print_board(GAMESTATE& game)//(bool send_board = false)
+std::string format_board(const GAMESTATE& game)//(bool send_board = false)
 {
     std::string out{""};
 
@@ -79,10 +78,7 @@ void print_board(GAMESTATE& game)//(bool send_board = false)
     }
     out += "-------------\n";
 
-    std::cout << out;
-
-    //if (send_board && server_fd)
-        //send_to_server(out);
+    return out;
 }
 
 void clear_board(GAMESTATE& game) 
@@ -90,83 +86,7 @@ void clear_board(GAMESTATE& game)
     //reset to defaults
     game.board.fill(game.empty_space);
     game.turns_left = 9;
-    //is_player_turn  = 1;
 }
-
-/*
-//establishes a connection with the server, optional
-signed int establish_connection(const std::string address)
-{
-    std::cout << "\nAttempting to connect to server...";
-
-    //creating hints
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_socktype = SOCK_STREAM; //tcp
-    hints.ai_family = AF_INET;      //IPv4
-    struct addrinfo *server_addr;
-
-    //attempt to connect (DNS)
-    if (getaddrinfo(address.c_str(), TTT_SERVER_PORT, &hints, &server_addr)) 
-    {
-        std::cerr << "getaddrinfo() failed." << GETSOCKETERRNO() << "\n";
-        return ERROR;
-    } else {
-        std::cout << "success.\n";
-    }
-
-    //creating the socket
-    std::cout << "Creating socket...";
-    SOCKET server_sock;
-    server_sock = 
-    socket(server_addr->ai_family,
-            server_addr->ai_socktype, 
-            server_addr->ai_protocol);
-    if (!ISVALIDSOCKET(server_sock)) 
-    {
-        std::cerr << "socket() failed" << GETSOCKETERRNO() << "\n";
-        return ERROR;
-    } else {
-        std::cout << "success.\n";
-    }
-
-    //initiate the TCP connection
-    std::cout << "Connecting...";
-    if (connect(server_sock,
-        server_addr->ai_addr, 
-        server_addr->ai_addrlen)) 
-    {
-        std::cerr << "connect() failed" << GETSOCKETERRNO() << "\n";
-        return ERROR;
-    } else {
-        std::cout << "connected\n";
-    }
-    //we no longer need this information since the connection is established
-    freeaddrinfo(server_addr);
-
-    //finally we have a reliable socket to send the server data
-    server_fd = server_sock;
-
-    return SUCCESS;
-}
-*/
-
-
-//-----------helper functions-----------
-/*
-//sending basic string data to server
-signed int send_to_server(const std::string msg, bool verbose = 0)
-{
-    if (verbose)
-    {
-        std::cout << "Sending " << msg.length() << " bytes of data\n" <<
-        "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" << msg << "\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
-    }
-
-    int bytes_sent = send(server_fd, msg.c_str(), msg.length(), 0);
-    return SUCCESS;
-}
-*/
 
 std::string check_for_win(GAMESTATE& game)
 {
@@ -219,52 +139,4 @@ std::string check_for_win(GAMESTATE& game)
 
     //no one won
     return "";
-}
-
-unsigned convert_to_unsigned(std::string s) 
-{
-    unsigned d = 0;
-
-    for(char c: s) 
-        {
-            if (c < '0' or c > '9')
-                {
-                    return EOF;
-                }
-            
-            d *= 10;
-            d += (c - '0');            
-        }
-
-    return d;
-}
-
-unsigned valid_input()
-{
-    std::string input = "";
-    unsigned dig = 0;
-    while(1) 
-    {
-        std::cout << "Choose a space >> ";
-        std::getline(std::cin, input);
-
-        if (std::cin.eof())
-        { 
-            std::cout << "<Input: EOF>" << "\n";
-            return EOF;
-        }
-
-        dig = convert_to_unsigned(input);
-
-        //adjust to work with board positions
-        dig -= BOARD_INDEX_OFFSET;
-
-        if (dig < 9)
-            return dig;
-        else
-        {
-            std::cout << "Only [1...9]\n\n";
-            std::cin.clear();
-        }
-    }
 }
