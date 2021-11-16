@@ -1,8 +1,7 @@
-//header file for windows, unix compatibility
-//includes are os depedent
+//header files for Tic-Tac-Toe (unix) networking
 
-#ifndef HELPERS_HPP
-#define HELPERS_HPP
+#ifndef TTTNET_HPP
+#define TTTNET_HPP
     
     #include <sys/types.h>
     #include <sys/socket.h>
@@ -23,4 +22,4 @@
     u_int8_t payload[255];
     } TYPE_LENGTH_DATA;
     
-#endif // HELPERS_HPP
+#endif // TTTNET_HPP

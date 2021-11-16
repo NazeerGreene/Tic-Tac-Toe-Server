@@ -1,12 +1,11 @@
-#include "helpers.hpp"
+#include "TTTNET.hpp"
 #include <iostream>
 
-
 // so we know how to interpret server messages (type-length-data)
-enum SERVER_TO_CLIENT_TYPES {REQUESTING_TAG = 1, REQUESTING_MOVE};
+enum SERVER_TO_CLIENT_TYPES {REQUESTING_TAG = 1, REQUESTING_MOVE, SENDING_MSG };
 
 // so we can send our messages to the server (type-length-data)
-enum CLIENT_TO_SERVER_TYPES {SEND_TAG = 1, SEND_MOVE, TERMINATED = 200 };
+enum CLIENT_TO_SERVER_TYPES {SEND_TAG = 1, SEND_MOVE, TERMINATED = EOF };
 
 // call to connect to TTT server given a ip and port.
 // exits program upon failure to create a socket or connect to server.
@@ -22,7 +21,6 @@ unsigned convert_to_unsigned(std::string s);
 // get user input from stdin, continuously ask for board position
 // until int is entered, or EOF; [lower...upper] inclusive
 u_int32_t get_board_position(unsigned lower, unsigned upper);
-
 
 int main(int argc, char * argv[]) 
 {
@@ -87,11 +85,11 @@ int main(int argc, char * argv[])
         // wait until server is ready 
         if (FD_ISSET(server, &reads)) 
         {
-            std::cout << "server ready for data\n";
+            //std::cout << "server ready for data\n";
 
             TYPE_LENGTH_DATA server_msg;
             int bytes_received = recv(server, &server_msg, sizeof(TYPE_LENGTH_DATA), 0);
-            std::cout << "Received: " << bytes_received << " from server" << std::endl;
+            //std::cout << "Received: " << bytes_received << " from server" << std::endl;
 
             if (bytes_received < 1) // connection lost
             {
@@ -102,6 +100,14 @@ int main(int argc, char * argv[])
             // if the server is ready for a move
             if (server_msg.type == SERVER_TO_CLIENT_TYPES::REQUESTING_MOVE)
             {
+                move_from_player = get_board_position(1,9);   // then get move from player
+                if (move_from_player == EOF) break; // from loop, end program
+                if (Send_Move(move_from_player-1, server)) break; // from loop, end program, connection lost
+                //user options [1...9] - 1 --> indexing [0..8]
+            }
+
+            if (server_msg.type == SERVER_TO_CLIENT_TYPES::SENDING_MSG)
+            {
                 char buff[256];
                 memset(buff, 0, 256); // zero out
                 // guaranteed null termination since TYPE_LENGTH_DATA::length < 256
@@ -109,17 +115,12 @@ int main(int argc, char * argv[])
                 // converting to ASCII
                 for(u_int8_t i = 0; i < server_msg.length; i++) buff[i] = char(server_msg.payload[i]);
 
-                std::cout << "Message from server:\n";
+                //std::cout << "Message from server:\n";
                 std::cout << buff << std::endl; // display message from server (typically TTT board)
-                std::cout << "-------------------\n";
-
-                move_from_player = get_board_position(1,9);   // then get move from player
-                if (move_from_player == EOF) break; // from loop, end program
-                if (Send_Move(move_from_player-1, server)) break; // from loop, end program
-                //user options [1...9] - 1 --> indexing [0..8]
+                //std::cout << "-------------------\n";
             }
 
-            std::cout << "finished reading from server\n";
+            //std::cout << "finished reading from server\n";
         }
     } // while
 
@@ -144,7 +145,8 @@ SOCKET connect_to_ttt_server(std::string ip, std::string port)
     
     struct addrinfo *server_list;
    
-    if (getaddrinfo(ip.c_str(), port.c_str(), &hints, &server_list)) {
+    if (getaddrinfo(ip.c_str(), port.c_str(), &hints, &server_list)) 
+    {
         std::cerr << "getaddrinfo() failed. " << GETSOCKETERRNO() << '\n';
         exit(EXIT_FAILURE);
     }
@@ -204,8 +206,8 @@ u_int32_t Send_Move(u_int32_t move, SOCKET server)
     packet.payload[0] = move;
     // it's safe to cut off any data since we don't need more than a byte to send the move
 
-    std::cout << "packet\n[\n\t" << "type\tSEND_MOVE\n\t" << "length  " << std::to_string(packet.length) <<
-    "\n\tpayload " << char(packet.payload[0] + '0') << "\n]" << std::endl;
+    //std::cout << "packet\n[\n\t" << "type\tSEND_MOVE\n\t" << "length  " << std::to_string(packet.length) <<
+    //"\n\tpayload " << char(packet.payload[0] + '0') << "\n]" << std::endl;
 
     // send the data
     int bytes_sent = send(server, &packet, sizeof(packet), 0);
