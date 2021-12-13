@@ -36,16 +36,16 @@ void TTT_verify_board_decorators(std::string& player, std::string& opponent, std
 bool player_move(unsigned move, GAMESTATE& game)
 {
     //only advanced if space is valid; otherwise continue
+    if (move > 8)   return false;
+    
     if (game.board.at(move) == game.empty_space)
     {
         game.board.at(move) = game.player_char;
         game.turns_left--;
-        game.is_player_turn = false;
+        // game.is_player_turn = false;
         return true;
-        //if (server_fd)   send_to_server(player_char + ": <Input: " + std::to_string(input) + ">\n");
-        //is_player_turn = false;
-        //turns_left--;
     }
+
     std::cout << " << Invalid: Pick a new space >>\n";
     return false;
 }
@@ -54,14 +54,13 @@ bool robot_move(unsigned move, GAMESTATE& game)
 {
     if (game.board.at(move) == game.empty_space) 
     {
-        std::cout << "robot made a valid move at " << move << '\n';
+        // std::cout << "robot made a valid move at " << move << '\n';
         game.board.at(move) = game.opp_char;
-        game.is_player_turn = true;
+        // game.is_player_turn = true;
         return true;
-        //if (server_fd)   send_to_server(opp_char + ": <Input: " + std::to_string(i) + ">\n");
-        //is_player_turn = true;
-        //break;
     }
+
+    // std::cout << "robot attempted move at " << move << '\n';
 
     return false;
 }
