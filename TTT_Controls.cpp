@@ -1,13 +1,13 @@
 #include "TTT_Controls.hpp"
 
-void TTT_default_board_decorators(const char * x, const char * o, const char * empty_space)
+void TTT_default_board_decorators(char * const x, char * const o, char * const empty_space)
 {
     *x = DEFAULT_X_CHAR;
     *o = DEFAULT_O_CHAR;
     *empty_space = DEFAULT_EMPTY_CHAR;
 }
 
-void TTT_verify_board_decorators(const char * x, const char * o, const char * empty_space) 
+void TTT_verify_board_decorators(char * const x, char * const o, char * const empty_space)
 {
     if (*x == DEFAULT_O_CHAR ||
         *x == DEFAULT_EMPTY_CHAR) 
@@ -46,21 +46,6 @@ bool player_move(const unsigned move, const char decorator, GAMESTATE& game)
     return false;
 }
 
-bool robot_move(unsigned move, GAMESTATE& game)
-{
-    if (game.board.at(move) == game.empty_space) 
-    {
-        // std::cout << "robot made a valid move at " << move << '\n';
-        game.board.at(move) = game.opp_char;
-        // game.is_player_turn = true;
-        return true;
-    }
-
-    // std::cout << "robot attempted move at " << move << '\n';
-
-    return false;
-}
-
 std::string format_board(const GAMESTATE& game)//(bool send_board = false)
 {
     std::string out{""};
@@ -68,8 +53,13 @@ std::string format_board(const GAMESTATE& game)//(bool send_board = false)
     out = "-------------\n";
     for(unsigned int i = 0; i < 9; i += 3)
     {
-        out += "| " + game.board.at(0 + i) + 
-        " | " + game.board.at(1 + i) + " | " + game.board.at(2 + i) + " |\n";
+        out += "| ";
+        out += game.board.at(0 + i);
+        out += " | ";
+        out += game.board.at(1 + i);
+        out += " | ";
+        out += game.board.at(2 + i);
+        out += " |\n";
     }
     out += "-------------\n";
 

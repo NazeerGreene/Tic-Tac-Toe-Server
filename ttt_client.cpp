@@ -285,7 +285,7 @@ u_int32_t get_board_position(unsigned lower, unsigned upper)
         if (input == "exit" || input == "close")
         {
             std::cout << "Closing the connection with the server.\n";
-            return EOF:
+            return EOF;
         }
 
         dig = convert_to_unsigned(input);

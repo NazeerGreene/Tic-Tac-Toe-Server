@@ -41,7 +41,7 @@ signed send_msg_to_client(SOCKET client, std::string msg);
 // before sending the next
 unsigned wait_for_ACK(SOCKET client);
 
-int main() 
+int main(int argc, char * argv[]) 
 {
     // defaults for initiating the server
     std::string TTT_ip {"127.0.0.1"};
@@ -77,7 +77,7 @@ int main()
 //---------------------------- FINISHED INIT -----------------------------
 //---------------------------- INITIALIZING THE GAME ---------------------------
     GAMESTATE game {
-        .empty_space = '',
+        .empty_space = DEFAULT_EMPTY_CHAR,
         .turns_left = 9
     };
 
@@ -116,11 +116,14 @@ int main()
     /* BLOCKING -- wait for two clients to connect */
     for(CLIENT client: clients)
     {
-        client = wait_for_client(socket_listen, &master);
-        if (client == EOF) break;
-        FD_SET(client, &master);
-        if (client > max_socket)    max_socket = client;
+        client.fd = wait_for_client(socket_listen, &master);
+        if (client.fd == EOF) break;
+        FD_SET(client.fd, &master);
+        if (client.fd > max_socket)    max_socket = client.fd;
     }
+
+    
+
 //------------------------ FINISHED INITIALIZING THE GAME --------------------------
 
     while(true) // purpose: reading from stdin, clients; mananging the game
@@ -160,11 +163,13 @@ int main()
         
         for(size_t i = 0; i < 2; i++)
         {
+            SOCKET client = clients.at(i).fd;
+
             if (game.turns_left == 9) // new game
                 text = "\nNew Game!\n";
 
 
-            if ( FD_ISSET(clients.at(i).fd, &reads) )
+            if ( FD_ISSET(client, &reads) )
             {
                 TYPE_LENGTH_DATA client_msg;
                 memset(&client_msg, 0, sizeof(TYPE_LENGTH_DATA)); // zero out
@@ -191,7 +196,7 @@ int main()
                         client_connection_closed = true; /* reset game and get new client */
                     }
 
-                    bool valid_move = player_move(move, game); // put player move onto board
+                    bool valid_move = player_move(move, clients.at(i).decorator, game); // put player move onto board
 
                     if (valid_move)
                     {
@@ -244,8 +249,6 @@ int main()
                 clients.at(0).did_request  = true;  // we need to alert X of the first move
                 clients.at(1).did_request  = false; // no need to send a move to O
 
-                SOCKET client = clients.at(i).fd;
-
                 // we no longer need this client
                 close(client);
                 FD_CLR(client, &master);
@@ -285,9 +288,10 @@ int main()
             } 
             else if (winner != game.empty_space) // there is a winner and game over
             { 
-                text = "\n\n~~~Player " + 
-                (winner == game.player_char ? game.player_char : game.opp_char) + 
-                " won!~~~\n" + format_board(game);
+                text  = "\n\n~~~Player ";
+                text += (winner == clients.at(0).decorator ? clients.at(0).decorator : clients.at(1).decorator); 
+                text += " won!~~~\n";
+                text += format_board(game);
 
                 game_over = true;            
             }
@@ -296,7 +300,7 @@ int main()
             {
                 std::cout << text;   
                 for(CLIENT i: clients) 
-                { send_msg_to_client(client, text); }
+                { send_msg_to_client(i.fd, text); }
                 clear_board(game); // restart game
                 text.clear();
 

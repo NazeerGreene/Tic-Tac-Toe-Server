@@ -53,7 +53,7 @@
         Default board decorators for the player, the opponent, and the empty space.
         See definitions at top of header. Ex DEFAULT_PLAYER_CHAR
     */
-    void TTT_default_board_decorators(const char * x, const char * o, const char * empty_space);
+    void TTT_default_board_decorators(char * const x, char * const o, char * const empty_space);
 
     /*
         Verifies if the characters are unique. If two characters are duplicates then those 
@@ -62,7 +62,7 @@
         The characters may not request another's default decorator. For example, x cannot be 
         DEFAULT_O_CHAR, otherwise x will be set to DEFAULT_X_CHAR.
     */
-    void TTT_verify_board_decorators(const char * x, const char * o, const char * empty_space);
+    void TTT_verify_board_decorators(char * const x, char * const o, char * const empty_space);
 
     /*
         Checks that the spot on the board the player wants to fill.
@@ -70,11 +70,6 @@
             not empty: returns false;
     */
     bool player_move(const unsigned move, const char decorator, GAMESTATE& game);
-
-    /*
-        The method for a "robot" to take one turn.
-    */
-    bool robot_move(unsigned move, GAMESTATE& game);
 
     /*
         Returns a string of the board in traditional 3x3 frame
