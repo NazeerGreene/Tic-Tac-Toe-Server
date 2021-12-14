@@ -25,9 +25,10 @@
         There should be only 2 players for the entire game.
     */
     typedef struct {
-        int fd;             /* for the socket */
+        int  fd;            /* for the socket */
         char decorator;     /* traditionally 'x' or 'o', but can be other characters. */
         bool is_player_turn;
+        bool did_request;
     } CLIENT;
 
     typedef struct {
