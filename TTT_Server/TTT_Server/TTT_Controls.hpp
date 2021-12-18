@@ -27,8 +27,6 @@
     typedef struct {
         int  fd;            /* for the socket */
         char decorator;     /* traditionally 'x' or 'o', but can be other characters. */
-        bool is_player_turn;
-        bool did_request;
     } CLIENT;
 
     typedef struct {
@@ -47,6 +45,9 @@
         "1 2 3\n"
         "4 5 6\n"
         "7 8 9\n";
+
+    const std::string instructions =
+        "Enter a number between 1...9 & press [RETURN]\n";
 
 
     /*

@@ -39,7 +39,7 @@ unsigned wait_for_ACK(SOCKET client);
 
 int main(int argc, char * argv[]) 
 {
-    // defaults for initiating the server
+    /* defaults for initiating the server */
     std::string TTT_ip {"127.0.0.1"};
     std::string TTT_port {"6767"};
 
@@ -71,31 +71,31 @@ int main(int argc, char * argv[])
         .empty_space = DEFAULT_EMPTY_CHAR,
         .turns_left = 9
     };
-
+    
     game.board.fill(game.empty_space);
+    bool game_active = true; /* for the main game loop */
 
     CLIENT X {
         .fd = 0,
-        .decorator = DEFAULT_X_CHAR,
-        .is_player_turn = true,
-        .did_request    = false
+        .decorator = DEFAULT_X_CHAR
     };
 
     CLIENT O {
         .fd = 0,
-        .decorator = DEFAULT_O_CHAR,
-        .is_player_turn = false,
-        .did_request    = true  // we don't need to send a request until X makes the first move
+        .decorator = DEFAULT_O_CHAR
     };
 
     std::array<CLIENT, 2> clients = { X, O };
 
 
-    //bool did_request = false; /* "did request" a move from the player */
+    bool should_request_move  = true; /* "should request move" from the player */
+    int  next_move_belongs_to = 0;    /* so we don't request a move from the wrong player */
     bool client_connection_closed = false;
 
-    // store winner character 
-    // [options: player char, opponent char, empty space (no winner)]
+    /*
+     store winner character
+     [options: player char, opponent char, empty space (no winner)]
+    */
     char winner = game.empty_space;
     std::string text{""}; /* the instructions we'll send to the player */
 
@@ -106,10 +106,11 @@ int main(int argc, char * argv[])
     for(CLIENT& client: clients)
     {
         client.fd = wait_for_client(socket_listen, &master);
-        if (client.fd == EOF) goto exit;
+        if (client.fd == EOF) game_active = false;
         FD_SET(client.fd, &master);
         if (client.fd > max_socket)    max_socket = client.fd;
         
+        /* So the game doesn't look frozen to the first person connected */
         if (client.decorator == DEFAULT_X_CHAR)
             send_msg_to_client(client.fd, "Waiting for another player...\n");
     }
@@ -118,7 +119,7 @@ int main(int argc, char * argv[])
 
 //------------------------ FINISHED INITIALIZING THE GAME --------------------------
 
-    while(true) // purpose: reading from stdin, clients; mananging the game
+    while(game_active) // purpose: reading from stdin, clients; mananging the game
     {
         FD_COPY(&master, &reads);
         struct timeval timeout { .tv_sec = 0 , .tv_usec = 200000 /*microseconds*/ }; // 0.5 seconds
@@ -151,35 +152,52 @@ int main(int argc, char * argv[])
         
         
         //----------------------------------- GAME  -------------------------------------
-        i = !i;
-        
-        SOCKET client_fd = clients.at(i).fd;
-        
-        //CLIENT& player   = clients.at(i);
-        //CLIENT& opponent = clients.at(!i);
+        i = !i; /* switch clients based on array indexing */
+                
+        /*
+            For readability: player is the current client we are reading from,
+            and opponent is the client's opponent (duh), so it's relative.
+         */
+        CLIENT& player   = clients.at(i);
+        CLIENT& opponent = clients.at(!i);
 
         if (game.turns_left == 9) // new game
-            text = "\nNew Game!\n";
+            text = "\nNew Game!\n" + instructions;
 
 
-        if ( !clients.at(i).did_request )
+        if ( next_move_belongs_to == i && should_request_move )
         {
-            text += valid_spaces + format_board(game); // output for the player
-            signed status = request_move(client_fd, text);
+            text += valid_spaces + instructions + format_board(game); // output for the player
+            text += "Your turn player ";
+            text += player.decorator;
+            text += '\n';
+            
+            signed status = request_move(player.fd, text);
+
+            if (status == EOF)
+            {
+                game_active = false;
+                continue;
+                
+            } /* nothing else to process */
+            
+            /* notify opponent so the game doesn't look frozen */
+            text += "Waiting for player ";
+            text += player.decorator;
+            text += " to move.\n";
+            send_msg_to_client(opponent.fd, text);
+
             text.clear();
-
-            if (status == EOF) goto exit;
-
-            clients.at(i).did_request = true;
+            should_request_move = false;
         } 
 
-        if ( FD_ISSET(client_fd, &reads) )
+        if ( FD_ISSET(player.fd, &reads) )
         {
             TYPE_LENGTH_DATA client_msg;
             memset(&client_msg, 0, sizeof(TYPE_LENGTH_DATA)); // zero out
             
             // we only want to look at the type and length first before any more operations on the sent data
-            ssize_t bytes_received = recv(client_fd, &client_msg, 2, 0);
+            ssize_t bytes_received = recv(player.fd, &client_msg, 2, 0);
             std::cout << "Received: " << bytes_received << " from client" << std::endl;
 
             if (bytes_received < 1) // connection lost
@@ -189,43 +207,45 @@ int main(int argc, char * argv[])
             }
 
             if ( client_msg.type == CLIENT_TO_SERVER_TYPES::RECEIVING_MOVE 
-                && clients.at(i).is_player_turn )
+                && next_move_belongs_to == i )
             {
                 u_int8_t move = 0;
-                ssize_t bytes_received = recv(client_fd, &move, 1, 0);
+                ssize_t bytes_received = recv(player.fd, &move, 1, 0);
                 
                 if (bytes_received < 1) // connection lost
                 {
                     std::cout << "Connection closed by client (RECEIVING_MOVE).\n";
                     client_connection_closed = true; /* reset game and get new client */
                 }
-
-                bool valid_move = player_move(move, clients.at(i).decorator, game); // put player move onto board
+                
+                /* put player move onto board */
+                bool valid_move = player_move(move, player.decorator, game);
 
                 if (valid_move)
                 {
                     // switch turns
-                    clients.at(i).is_player_turn    = false; // no longer current client's turn
-                    clients.at(!i).is_player_turn   = true;  // now it's the opponent's turn
-                    clients.at(i).did_request       = true;  // there's no need to request a new move
-                    clients.at(!i).did_request      = false; // we need the opponent to send a new move
+                    next_move_belongs_to = !next_move_belongs_to;
                     
-                    text = "Accepted: " + std::to_string(move) + '\n' + format_board(game);
-                    send_msg_to_client(client_fd, text);
-                    text.clear();
+                    //text = "Accepted: " + std::to_string(move+1) + '\n' + format_board(game);
+                    //text += "Waiting for player ";
+                    //text += opponent.decorator;
+                    //text += " to move.\n";
+                    //send_msg_to_client(player.fd, text);
+                    //text.clear();
                 }
                 else 
                 {
-                    clients.at(i).did_request = false; // we need to request for a new move
-                    text += "Previous move: " + std::to_string(move) + " was not a valid move.\n";
+                    text += "Previous move: " + std::to_string(move+1) + " was not a valid move.\n";
                 }
+                
+                /* we will need a new move whether it's from the opponent or the player (because of a faulty previous move). */
+                should_request_move = true;
 
             } // CLIENT_TO_SERVER_TYPES::RECEIVING_MOVE
 
             else if ( client_msg.type == CLIENT_TO_SERVER_TYPES::TERMINATED )
             {
                 std::cout << "Recieved TERMINATED flag from client, closing connection with client.\n";
-                //shutdown(client_fd, 2); // send client the FIN flag
                 client_connection_closed = true; /* reset game and get new client */
 
             } // CLIENT_TO_SERVER_TYPES::TERMINATED
@@ -233,7 +253,7 @@ int main(int argc, char * argv[])
             else { // if we don't know how to interpret, throw away the message
                 
                 char garbage[256];
-                ssize_t bytes_received = recv(client_fd, &garbage, client_msg.length, 0);
+                ssize_t bytes_received = recv(player.fd, &garbage, client_msg.length, 0);
                 
                 if (bytes_received < 1) // connection lost
                 {
@@ -247,30 +267,32 @@ int main(int argc, char * argv[])
 
         if (client_connection_closed) /* if there's no client */
         {
-            // a fresh start
+            /* a fresh start */
             clear_board(game); /* restart game values: board, turns, player_turn = true */
             text.clear();
 
-            clients.at(0).is_player_turn = false; // start with X for a first move
-            clients.at(1).is_player_turn = true;  // O will not make the first move
+            next_move_belongs_to = 1; /* will toggle at top of loop */
 
-            clients.at(0).did_request  = true;  // we need to alert X of the first move
-            clients.at(1).did_request  = false; // no need to send a move to O
+            should_request_move = true;
 
             // we no longer need this client
-            close(client_fd);
-            FD_CLR(client_fd, &master);
+            close(player.fd);
+            FD_CLR(player.fd, &master);
+            
+            /* notify opponent of status */
+            send_msg_to_client(opponent.fd, "\nPrevious player disconnected, waiting for a new player...\n");
             
             std::cout << "\n---> WAITING FOR CONNECTIONS... ";
-            client_fd = wait_for_client(socket_listen, &master);
-            if (client_fd == EOF) break; // EOF from admin (stdin)
+            player.fd = wait_for_client(socket_listen, &master);
+            if (player.fd == EOF) break; // EOF from admin (stdin)
 
-            FD_SET(client_fd, &master);
-            clients.at(i).fd = client_fd;
+            FD_SET(player.fd, &master);
 
-            max_socket = ( clients.at(0).fd > clients.at(1).fd ? clients.at(0).fd : clients.at(1).fd );
+            max_socket = ( player.fd > opponent.fd ? player.fd : opponent.fd );
             client_connection_closed = false;
-            continue; /* in case admin wants to shut down */
+            
+            // send opponent game updates
+            continue; /* in case admin wants to shut down and no point in checking win conditions */
         }
 
         winner = check_for_win(game);
