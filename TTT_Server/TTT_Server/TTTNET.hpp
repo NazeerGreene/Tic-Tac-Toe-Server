@@ -21,5 +21,8 @@
     u_int8_t length; /* max of 255 characters */
     u_int8_t payload[255];
     } TYPE_LENGTH_DATA;
+
+    enum SERVER_TO_CLIENT_TYPES { REQUESTING_TAG = 1, REQUESTING_MOVE, SENDING_MSG };
+    enum CLIENT_TO_SERVER_TYPES { SENDING_TAG = 1, SENDING_MOVE, ACK, TERMINATED = 200 };
     
 #endif // TTTNET_HPP
