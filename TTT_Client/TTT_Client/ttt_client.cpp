@@ -2,37 +2,54 @@
 #include <iostream>
 #include <string>
 
-// call to connect to TTT server given a ip and port.
-// exits program upon failure to create a socket or connect to server.
+/*
+    Call to connect to TTT server given a ip and port.
+    Exits program upon failure to create a socket or connect to server.
+    Returns the server socket upon success.
+*/
 SOCKET connect_to_ttt_server(std::string ip, std::string port);
 
-// to send a single packet to the server
+/*
+    Send a single type-length-data packet to the server,
+    used for sending player's move.
+    Returns 0 upon success, EOF if no bytes were sent to the server.
+*/
 unsigned send_to_server(SOCKET server_fd, enum CLIENT_TO_SERVER_TYPES type, u_int8_t data);
 
 /*
-    Returns a string of the board in traditional 3x3 frame
+    Returns a string of the board in traditional 3x3 frame.
+    Returns error message if less than 9 characters.
 */
 std::string format_board(const std::string board);
 
-// to ensure user enters a valid digit [1-9]
+/*
+    Converts a string to an unsigned int.
+    Returns the int upon success,
+    EOF if a non-numeric character is found.
+*/
 unsigned convert_to_unsigned(std::string s);
 
-// get user input from stdin, continuously ask for board position
-// until int is entered, or EOF; [lower...upper] inclusive
+/*
+    Get user input from stdin, continuously ask for board position
+    until int is entered, or EOF; [floor...ceiling] are the lower
+    and upper limits.
+*/
 u_int32_t get_board_position(unsigned floor, unsigned ceiling);
 
-const std::string seperator = "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
 
-const std::string valid_spaces =
-    "|1 2 3 |\n"
-    "|4 5 6 | Valid Board Positions\n"
-    "|7 8 9 |\n";
-
-const std::string instructions =
-    "Enter a number between 1...9 & press [RETURN]\n";
 
 int main(int argc, char * argv[]) 
 {
+    const std::string seperator = "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
+
+    const std::string valid_spaces =
+        "|1 2 3 |\n"
+        "|4 5 6 | Valid Board Positions\n"
+        "|7 8 9 |\n";
+
+    const std::string instructions =
+        "Enter a number between 1...9 & press [RETURN]\n";
+    
     /* defaults for connecting to the server */
     std::string TTT_ip {"127.0.0.1"};
     std::string TTT_port {"6767"};
@@ -72,15 +89,13 @@ int main(int argc, char * argv[])
         reads = master;
         struct timeval timeout { .tv_sec = 0 , .tv_usec = 500000 /*microseconds*/ }; // 0.5 seconds
 
-        //std::cout << "Before select()\n";
-        if (select(max_socket+1, &reads, 0, 0, &timeout) < 0) 
+        if (select(max_socket+1, &reads, 0, 0, &timeout) < 0)
         {
             std::cerr << "select() failed. " << GETSOCKETERRNO() << '\n';
             exit(EXIT_FAILURE);
         }
-        //std::cout << "After select()\n";
 
-        // safe exit by player
+        /* safe exit by player */
         if (FD_ISSET(STDIN_FILENO, &reads))
         {
             if(getchar() == EOF) break;
@@ -91,17 +106,17 @@ int main(int argc, char * argv[])
             }
         }
 
-        // wait until server is ready 
+        /* wait until server is ready */
         if (FD_ISSET(server, &reads)) 
         {
             TYPE_LENGTH_DATA server_msg;
-            memset(&server_msg, 0, sizeof(TYPE_LENGTH_DATA)); // zero out
+            memset(&server_msg, 0, sizeof(TYPE_LENGTH_DATA)); /* zero out */
             
             /* we only want to look at the type and length first before any more operations on the sent data */
             ssize_t bytes_received = recv(server, &server_msg, 2, 0);
             if ( server_msg.length ) bytes_received = recv(server, server_msg.payload.msg, server_msg.length, 0);
             
-            if ( bytes_received < 1) // connection lost
+            if ( bytes_received < 1) /* connection lost */
             {
                 std::cout << "Connection closed by server (receiving payload).\n";
                 break; // from loop, end program
@@ -121,41 +136,32 @@ int main(int argc, char * argv[])
 
                 std::cout << valid_spaces << instructions; /* to help the user */
                 
-                move_from_player = get_board_position(1,9);   // then get move from player
+                move_from_player = get_board_position(1,9);   /* then get move from player */
                 
                 if (move_from_player == EOF)
                 {
-                    send_to_server(server, CLIENT_TO_SERVER_TYPES::TERMINATED, 0); // send formal request to close game
-                    continue;
+                    send_to_server(server, CLIENT_TO_SERVER_TYPES::TERMINATED, 0); /* send formal request to close game */
+                    continue; /* nothing else to process */
                 }
                 else if
                     ( send_to_server(server, CLIENT_TO_SERVER_TYPES::SENDING_MOVE , move_from_player-1) ) break;
-                /* break from game loop, end program, connection lost
-                   user options [1...9] - 1 --> indexing [0..8]  */
-                
-                //std::cout << seperator;
+                    /* user options [1...9] - 1 --> board indexing [0..8]  */
             }
             
             else if (server_msg.type == SERVER_TO_CLIENT_TYPES::SENDING_BOARD)
             {
                 std::cout << seperator;
                 std::cout << "You're player " << player << '\n';
-                if (is_new_game)
-                    { std::cout << "\nNew Game!\n"; is_new_game = false; }
-                else
-                    std::cout << std::endl;
+                if (is_new_game) { std::cout << "\nNew Game!\n"; is_new_game = false; }
+                else std::cout << std::endl;
                 
-                /* 3x3 board 9 bytes in size */
+                /* Get 3x3 board for pretty display */
                 std::cout << format_board(server_msg.payload.msg);
             }
 
             else if (server_msg.type == SERVER_TO_CLIENT_TYPES::SENDING_MSG)
             {
-                //char buff[256];
-                //memset(buff, 0, 256); // zero out
-                // guaranteed null termination since TYPE_LENGTH_DATA::length < 256
-
-                std::cout << server_msg.payload.msg << std::endl; // display message from server
+                std::cout << server_msg.payload.msg << std::endl; /* display message from server */
             }
                         
             else {} /* if we don't know how to interpret, throw away the messagev*/
@@ -190,7 +196,7 @@ SOCKET connect_to_ttt_server(std::string ip, std::string port)
         exit(EXIT_FAILURE);
     }
 
-    //not necessary but we print out the remote address for debugging
+    /* not necessary but we print out the remote address for debugging */
     printf("Remote address is: ");
     char address_buffer[100];
     char service_buffer[100];
@@ -200,7 +206,7 @@ SOCKET connect_to_ttt_server(std::string ip, std::string port)
             NI_NUMERICHOST);
     std::cout << address_buffer << ' ' << service_buffer << '\n';
 
-    //Create the socket to connect to server
+    /* Create the socket to connect to server */
     std::cout << "Creating socket...\n";
 
     SOCKET server;
@@ -213,8 +219,8 @@ SOCKET connect_to_ttt_server(std::string ip, std::string port)
         exit(EXIT_FAILURE);
     }
 
-    //connect associates a socket with a remote address and intiates
-    //the TCP connection
+    /* Connect associates a socket with a remote address and intiates
+       the TCP connection */
     std::cout << "Connecting to Tic Tac Toe server... ";
     if (connect(server,
                 server_list->ai_addr, 
@@ -224,10 +230,10 @@ SOCKET connect_to_ttt_server(std::string ip, std::string port)
         exit(EXIT_FAILURE);
     }
 
-    //we no longer need this information since the connection is established
+    /* we no longer need this information since the connection is established */
     freeaddrinfo(server_list);
 
-    //finally ready for user input from the terminal
+    /* finally ready for user input from the terminal */
     std::cout << "Connected.\n";
 
     return server;
@@ -237,7 +243,7 @@ unsigned send_to_server(SOCKET server_fd, enum CLIENT_TO_SERVER_TYPES type, u_in
 {
     TYPE_LENGTH_DATA packet;
     memset(&packet, 0, sizeof(packet));
-    //static int loop = 0; // for debugging
+    //static int loop = 0; /* for debugging */
 
     /* so that the client knows what the server is requesting */
     packet.type = type;
@@ -262,7 +268,7 @@ unsigned send_to_server(SOCKET server_fd, enum CLIENT_TO_SERVER_TYPES type, u_in
     return 0; // SUCCESS
 }
 
-std::string format_board(const std::string board)//(bool send_board = false)
+std::string format_board(const std::string board)
 {
     if (board.size() < 9) return "Board too small to generate.\n";
     
