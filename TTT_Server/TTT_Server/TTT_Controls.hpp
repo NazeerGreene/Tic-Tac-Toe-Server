@@ -75,7 +75,7 @@
     /*
         Returns a string of the board in traditional 3x3 frame
     */
-    std::string format_board(const GAMESTATE& game);//(bool send_board = false)
+    //std::string format_board(const GAMESTATE& game);//(bool send_board = false)
 
     /*
         Resets the board for a new game, and the turns left in the game.

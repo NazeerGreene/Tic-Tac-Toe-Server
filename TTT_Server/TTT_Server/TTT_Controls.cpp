@@ -46,6 +46,7 @@ bool player_move(const unsigned move, const char decorator, GAMESTATE& game)
     return false;
 }
 
+/*
 std::string format_board(const GAMESTATE& game)//(bool send_board = false)
 {
     std::string out{""};
@@ -64,7 +65,7 @@ std::string format_board(const GAMESTATE& game)//(bool send_board = false)
     out += "-------------\n";
 
     return out;
-}
+}*/
 
 void clear_board(GAMESTATE& game) 
 {

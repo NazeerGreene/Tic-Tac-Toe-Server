@@ -91,7 +91,7 @@ int main(int argc, char * argv[])
     std::string text{""}; /* the instructions we'll send to the player */
     std::string preface{""};
 
-    // current player -- either 0 (X) or 1 (O)
+    /* current player -- either 0 (X) or 1 (O) */
     unsigned i = 1;
 
     /* BLOCKING -- wait for two clients to connect */
@@ -154,35 +154,44 @@ int main(int argc, char * argv[])
         CLIENT& player   = clients.at(i);
         CLIENT& opponent = clients.at(!i);
 
-        if (game.turns_left == 9) // new game
-            preface = "\nNew Game!\n";
-
-
         if ( next_move_belongs_to == i && should_request_move )
         {
-            preface += valid_spaces + instructions + format_board(game); // output for the player
-            text += "Your turn player ";
-            text += player.decorator;
-            text += '\n';
+            signed status = 0;
             
-            signed status = send_to_client(player.fd, SERVER_TO_CLIENT_TYPES::SENDING_MSG, preface + text);
+            if (game.turns_left == 9)
+            {
+                text  = player.decorator;
+                text += opponent.decorator;
+                if ( send_to_client(player.fd, SERVER_TO_CLIENT_TYPES::INIT, text) )
+                    { client_connection_closed = true; }
+                text.clear();
+                text  = opponent.decorator;
+                text += player.decorator;
+                if ( send_to_client(opponent.fd, SERVER_TO_CLIENT_TYPES::INIT, text) )
+                    { client_connection_closed = true; continue; } /* we want to make sure opponent switches to player */
+                text.clear();
+            }
+            
+            
+            /* send a request to the player for a move */
+            status = send_to_client(player.fd, SERVER_TO_CLIENT_TYPES::SENDING_BOARD, game.board.data());
             status = send_to_client(player.fd, SERVER_TO_CLIENT_TYPES::REQUESTING_MOVE);
+
 
             if (status == EOF)
             {
-                game_active = false;
-                continue;
+                client_connection_closed = true;
             } /* nothing else to process */
             
             /* notify opponent so the game doesn't look frozen */
-            text.clear();
-            text += "Waiting for player ";
-            text += player.decorator;
-            text += " to move.\n";
-            status = send_to_client(opponent.fd, SERVER_TO_CLIENT_TYPES::SENDING_MSG, preface + text);
+            status = send_to_client(opponent.fd, SERVER_TO_CLIENT_TYPES::SENDING_BOARD, game.board.data());
 
-            preface.clear();
-            text.clear();
+            if (status == EOF)
+            {
+                client_connection_closed = true;
+                continue;
+            } /* nothing else to process */
+            
             should_request_move = false;
         } 
 
@@ -223,7 +232,8 @@ int main(int argc, char * argv[])
                 }
                 else 
                 {
-                    text += "Previous move: " + std::to_string(move+1) + " was not a valid move.\n";
+                    text = "Previous move: " + std::to_string(move+1) + " was not a valid move.\n";
+                    if ( send_to_client(player.fd, SERVER_TO_CLIENT_TYPES::SENDING_MSG, text) ) client_connection_closed = true;
                 }
                 
                 /* we will need a new move whether it's from the opponent or the player (because of a faulty previous move). */
@@ -263,7 +273,7 @@ int main(int argc, char * argv[])
 
             should_request_move = true;
 
-            // we no longer need this client
+            /* we no longer need this client */
             close(player.fd);
             FD_CLR(player.fd, &master);
             
@@ -290,18 +300,17 @@ int main(int argc, char * argv[])
         
         if (winner == game.empty_space && game.turns_left == 0) // no winner and game over
         {
-            text = "It's a draw!\n" + format_board(game);
-            
+            text = "It's a draw!\n";
+                    
             game_over = true;
             
         } 
         else if (winner != game.empty_space) // there is a winner and game over
         { 
             text  = "\n\n~~~Player ";
-            text += (winner == clients.at(0).decorator ? clients.at(0).decorator : clients.at(1).decorator); 
+            text += winner;
             text += " won!~~~\n";
-            text += format_board(game);
-
+            
             game_over = true;            
         }
 
@@ -309,7 +318,10 @@ int main(int argc, char * argv[])
         {
             std::cout << text;   
             for(CLIENT i: clients) 
-            { send_to_client(i.fd, SERVER_TO_CLIENT_TYPES::SENDING_MSG, text); }
+            {
+                send_to_client(i.fd, SERVER_TO_CLIENT_TYPES::SENDING_MSG, text);
+                send_to_client(i.fd, SERVER_TO_CLIENT_TYPES::SENDING_BOARD, game.board.data());
+            }
             clear_board(game); // restart game
             text.clear();
 
@@ -476,7 +488,7 @@ void *get_in_addr(struct sockaddr *sa)
         return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-unsigned send_to_client(SOCKET client, enum SERVER_TO_CLIENT_TYPES type, std::string data)
+unsigned send_to_client(SOCKET client_fd, enum SERVER_TO_CLIENT_TYPES type, std::string data)
 {
     TYPE_LENGTH_DATA packet;
     memset(&packet, 0, sizeof(packet));
@@ -510,7 +522,7 @@ unsigned send_to_client(SOCKET client, enum SERVER_TO_CLIENT_TYPES type, std::st
     "\n\tpayload \"" << data << "\"\n]" << std::endl;
 
     /* send the data */
-    ssize_t bytes_sent = send(client, &packet, 2 + packet.length, 0);
+    ssize_t bytes_sent = send(client_fd, &packet, 2 + packet.length, 0);
 
     if (bytes_sent < 1)
     {
