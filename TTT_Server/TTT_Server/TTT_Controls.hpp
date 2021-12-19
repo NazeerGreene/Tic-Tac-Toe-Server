@@ -1,11 +1,13 @@
-//Basic 3x3 tic tac toe game; not scalable
-//Spaces enumerated from [0...8]
-//board characters refer to player, opponent, and empty space
+/*
+    Basic 3x3 tic tac toe game.
+    Spaces enumerated from [0...8].
+    Board characters refer to player X, player O, and empty space.
+*/
 
 #ifndef TTT_CONTROLS_HPP
 #define TTT_CONTROLS_HPP
 
-    // Standard includes
+    /* Standard includes */
     #include <iostream>
     #include <string>
     #include <array> /* for the board */
@@ -13,11 +15,6 @@
     #define DEFAULT_X_CHAR     'X'
     #define DEFAULT_O_CHAR     'O'
     #define DEFAULT_EMPTY_CHAR '~'
-
-    #define ERROR   -1
-    #define SUCCESS  0
-
-
 
     //-----------player-----------
     /*
@@ -35,7 +32,6 @@
 
         //----------controls-----------
         std::array<char, 9> board;
-        bool is_player_turn;
         unsigned int turns_left; /* should be 9, 1 for each empty space */
 
     } GAMESTATE;
@@ -57,15 +53,10 @@
 
     /*
         Checks that the spot on the board the player wants to fill.
-            is empty : fills the spot with decorator and returns true.
-            not empty: returns false;
+            is empty : fills the spot with decorator and returns true; decrements turns_left.
+            not empty: returns false.
     */
     bool player_move(const unsigned move, const char decorator, GAMESTATE& game);
-
-    /*
-        Returns a string of the board in traditional 3x3 frame
-    */
-    //std::string format_board(const GAMESTATE& game);//(bool send_board = false)
 
     /*
         Resets the board for a new game, and the turns left in the game.

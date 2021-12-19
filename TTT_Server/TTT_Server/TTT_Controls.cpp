@@ -32,7 +32,7 @@ void TTT_verify_board_decorators(char * const x, char * const o, char * const em
 
 bool player_move(const unsigned move, const char decorator, GAMESTATE& game)
 {
-    //only advanced if space is valid; otherwise continue
+    /* only advanced if space is valid; otherwise continue */
     if (move > 8)   return false;
     
     if (game.board.at(move) == game.empty_space)
@@ -42,24 +42,22 @@ bool player_move(const unsigned move, const char decorator, GAMESTATE& game)
         return true;
     }
 
-    std::cout << " << Invalid: Pick a new space >>\n";
     return false;
 }
 
 void clear_board(GAMESTATE& game) 
 {
-    //reset to defaults
+    /* reset to defaults */
     game.board.fill(game.empty_space);
     game.turns_left = 9;
-    //game.is_player_turn = true;
 }
 
 char check_for_win(const GAMESTATE& game)
 {
-    auto& board = game.board;
+    const auto& board = game.board;
     const char empty_space = game.empty_space;
 
-    //check rows
+    /* check rows */
     for(unsigned i = 0; i < 9; i += 3) 
     {  
         /*  
@@ -76,12 +74,12 @@ char check_for_win(const GAMESTATE& game)
         return board.at(0+i);
     }
 
-    // check columns
+    /* check columns */
     for(unsigned i = 0; i < 3; i++) 
     {
         if (board.at(0+i) == empty_space) continue;
 
-        //check [0,3,6], [1,4,7], [2,5,8]
+        /* check [0,3,6], [1,4,7], [2,5,8] */
         if( board.at(0+i) == board.at(3+i) && 
         board.at(3+i) == board.at(6+i) ) 
         return board.at(0+i);

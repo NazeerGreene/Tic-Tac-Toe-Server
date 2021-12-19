@@ -1,6 +1,9 @@
-//TTT server -- 
-//IPv4 only for now
-//does not handle ctrl-D, use ctrl-C to terminate session
+/*
+    TTT server
+    IPv4 only for now.
+    Author: Na'zeer Greene
+    Class: CS341 Computer Networks
+*/
 
 #include "TTTNET.hpp"        /* for networking purposes */
 #include "TTT_Controls.hpp"  /* for the TTT game itself */
@@ -8,26 +11,32 @@
 #include <string>
 #include <array>
 
-// create and bind socket to local port; exits on failure;
-// purpose: to generate socket for listening
+/*
+    Create and bind socket to local port; exits program on failure.
+    Purpose: to generate socket for listening
+    Returns listening socket on success.
+    Exits program if socket(), bind(), listen(), or setsockopt() fails.
+*/
 SOCKET bind_server_and_get_listen_socket(const char * ip, const char *port);
 
-// wait for a client to connect, blocking;
-// adds listener socket to fd_set;
-// print out client info (IP addr) and then return client file desc.
+/*
+    Wait for a client to connect, blocking;
+    adds listener socket to fd_set, removes listener before returning.
+    Print out client info (IP addr).
+    Returns:
+        EOF if CTRL-D from stdin.
+        Client file descriptor on success.
+    Exits program if select() fails.
+*/
 SOCKET wait_for_client(SOCKET listener, fd_set * ttt_set);
 
-// get sockaddr, IPv4 or IPv6:
-void *get_in_addr(struct sockaddr *sa); // provided by Beej's Networking Guide
-
-// request move from player; blocking
-// -2   message too long, must be less than 256 characters
-// EOF  connection with client closed
+/*
+    Send message to client. Relies on type-length-data encoding.
+    Returns:
+        -2   message too long, must be less than 256 characters.
+        EOF  connection with client closed.
+*/
 unsigned send_to_client(SOCKET client, enum SERVER_TO_CLIENT_TYPES type, std::string data="");
-
-// BLOCKING -- wait for client to acknowledge last message 
-// before sending the next
-unsigned wait_for_ACK(SOCKET client);
 
 int main(int argc, char * argv[]) 
 {
@@ -35,11 +44,11 @@ int main(int argc, char * argv[])
     std::string TTT_ip {"127.0.0.1"};
     std::string TTT_port {"6767"};
 
-    if (argc > 1) // if other ip or port specified
+    if (argc > 1) /* if other ip or port specified */
     {
-        TTT_ip = argv[1]; // should be alterantive ip
+        TTT_ip = argv[1]; /* should be alterantive ip */
 
-        if(argc > 2) TTT_port = argv[2]; // should be alternative port
+        if(argc > 2) TTT_port = argv[2]; /* should be alternative port */
     }
 
 //----------------------- INITIALIZING CONNECTION SETUP  ---------------------
@@ -78,7 +87,9 @@ int main(int argc, char * argv[])
     };
 
     std::array<CLIENT, 2> clients = { X, O };
-
+    
+    /* current player -- either 0 (X) or 1 (O) */
+    unsigned i = 1;
 
     bool should_request_move  = true; /* "should request move" from the player */
     int  next_move_belongs_to = 0;    /* so we don't request a move from the wrong player */
@@ -89,16 +100,13 @@ int main(int argc, char * argv[])
      [options: player char, opponent char, empty space (no winner)]
     */
     char winner = game.empty_space;
-    std::string text{""}; /* the instructions we'll send to the player */
-    std::string preface{""};
-
-    /* current player -- either 0 (X) or 1 (O) */
-    unsigned i = 1;
+    std::string text{""}; /* an message we have for the player */
 
     /* BLOCKING -- wait for two clients to connect */
     for(CLIENT& client: clients)
     {
         client.fd = wait_for_client(socket_listen, &master);
+        
         if (client.fd == EOF) game_active = false;
         FD_SET(client.fd, &master);
         if (client.fd > max_socket)    max_socket = client.fd;
@@ -113,12 +121,12 @@ int main(int argc, char * argv[])
 
 //------------------------ FINISHED INITIALIZING THE GAME --------------------------
 
-    while(game_active) // purpose: reading from stdin, clients; mananging the game
+    while(game_active) /* this is where the game controls start */
     {
         FD_COPY(&master, &reads);
         struct timeval timeout { .tv_sec = 0 , .tv_usec = 200000 /*microseconds*/ }; // 0.5 seconds
 
-        // we pass a timeout because we want don't select() to block
+        /* we pass a timeout because we want don't select() to block */
         if (select(max_socket+1, &reads, 0, 0, &timeout) < 0) 
         {
             std::cerr << "select() failed. " << GETSOCKETERRNO() << ' ';
@@ -141,17 +149,15 @@ int main(int argc, char * argv[])
                 std::cin.clear(); // clear any bad conditions set by std::cin
             }
        }
-       //-------------------------------------
+        //------------ admin ----------------
 
         
         
         //----------------------------------- GAME  -------------------------------------
         i = !i; /* switch clients based on array indexing */
                 
-        /*
-            For readability: player is the current client we are reading from,
-            and opponent is the client's opponent (duh), so it's relative.
-         */
+        /*  For readability: player is the current client we are reading from,
+            and opponent is the client's opponent (duh), so it's relative. */
         CLIENT& player   = clients.at(i);
         CLIENT& opponent = clients.at(!i);
 
@@ -159,13 +165,14 @@ int main(int argc, char * argv[])
         {
             signed status = 0;
             
-            if (game.turns_left == 9)
+            if (game.turns_left == 9) /* signal to clients a new round is starting */
             {
                 text  = player.decorator;
                 text += opponent.decorator;
                 if ( send_to_client(player.fd, SERVER_TO_CLIENT_TYPES::INIT, text) )
                     { client_connection_closed = true; }
                 text.clear();
+                
                 text  = opponent.decorator;
                 text += player.decorator;
                 if ( send_to_client(opponent.fd, SERVER_TO_CLIENT_TYPES::INIT, text) )
@@ -195,7 +202,7 @@ int main(int argc, char * argv[])
             if (status == EOF)
             {
                 client_connection_closed = true;
-                continue;
+                continue; /* we want to make sure opponent switches to player */
             } /* nothing else to process */
             
             should_request_move = false;
@@ -222,11 +229,12 @@ int main(int argc, char * argv[])
             {
                 u_int8_t move = client_msg.payload.data;
                 
-                /* put player move onto board */
+                /* put player move onto board, if the move is valid,
+                   then game.turns_left automatically decremented. */
                 bool valid_move = player_move(move, player.decorator, game);
 
                 if (valid_move)
-                { next_move_belongs_to = !next_move_belongs_to; /* switch turns */ }
+                { next_move_belongs_to = !i; /* switch turns */ }
                 else 
                 {
                     text = "PREVIOUS MOVE: " + std::to_string(move+1) + " WAS NOT A VALID MOVE.\n";
@@ -254,10 +262,12 @@ int main(int argc, char * argv[])
         if (client_connection_closed) /* if there's no client */
         {
             /* a fresh start */
-            clear_board(game); /* restart game values: board, turns, player_turn = true */
+            clear_board(game); /* restart game values: board & turns */
             text.clear();
-
-            next_move_belongs_to = !i; /* will toggle at top of loop */
+            
+            /* we want the opponent to get the first move in the next
+               game since they have to wait */
+            //next_move_belongs_to = !i;
 
             should_request_move = true;
 
@@ -271,14 +281,13 @@ int main(int argc, char * argv[])
             
             std::cout << "\n---> WAITING FOR CONNECTIONS... ";
             player.fd = wait_for_client(socket_listen, &master);
-            if (player.fd == EOF) break; // EOF from admin (stdin)
+            if (player.fd == EOF) break; /* EOF from admin (stdin) */
 
             FD_SET(player.fd, &master);
 
             max_socket = ( player.fd > opponent.fd ? player.fd : opponent.fd );
             client_connection_closed = false;
             
-            // send opponent game updates
             continue; /* in case admin wants to shut down and no point in checking win conditions */
         }
 
@@ -305,10 +314,10 @@ int main(int argc, char * argv[])
             std::cout << text;   
             for(CLIENT i: clients) 
             {
-                send_to_client(i.fd, SERVER_TO_CLIENT_TYPES::SENDING_MSG, text);
                 send_to_client(i.fd, SERVER_TO_CLIENT_TYPES::SENDING_BOARD, game.board.data());
+                send_to_client(i.fd, SERVER_TO_CLIENT_TYPES::SENDING_MSG, text);
             }
-            clear_board(game); // restart game
+            clear_board(game); /* restart game */
             text.clear();
 
             game_over = false;
@@ -318,7 +327,6 @@ int main(int argc, char * argv[])
 
     } //while
 
-    exit:
     std::cout << "Closing listening socket...\n";
     CLOSESOCKET(socket_listen);
     std::cout << "Closing clients' sockets...\n";
@@ -338,13 +346,13 @@ int main(int argc, char * argv[])
 
 SOCKET bind_server_and_get_listen_socket(const char * ip, const char *port)
 {
-    //setting up our configurations
+    /* setting up our configurations */
     std::cout << "Configuring local address...\n";
     struct addrinfo hints, *bind_address;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family     = AF_INET;     //IPv4
-    hints.ai_socktype   = SOCK_STREAM; //TCP
-    hints.ai_flags      = AI_PASSIVE;  //listen on every network interface
+    hints.ai_family     = AF_INET;     // IPv4
+    hints.ai_socktype   = SOCK_STREAM; // TCP
+    hints.ai_flags      = AI_PASSIVE;  // listen on every network interface
 
     getaddrinfo(ip, port, &hints, &bind_address);
 
@@ -369,7 +377,7 @@ SOCKET bind_server_and_get_listen_socket(const char * ip, const char *port)
         exit(EXIT_FAILURE);
     }
 
-    // binding socket to a local address
+    /* binding socket to a local address */
     std::cout << "Binding socket to local address...\n";
     if (bind(socket_listen,
                 bind_address->ai_addr, 
@@ -379,14 +387,12 @@ SOCKET bind_server_and_get_listen_socket(const char * ip, const char *port)
         exit(EXIT_FAILURE);
     }
 
-    // free linked list
+    /* free linked list */
     freeaddrinfo(bind_address);
 
-    // listening for incoming connections
     std::cout << "Listening for a new client...\n";
 
-    // we only want one client at a time
-    if (listen(socket_listen, 2) < 0) 
+    if (listen(socket_listen, 2) < 0)
     {
         std::cerr << "listen() failed. " << GETSOCKETERRNO() << '\n';
         exit(EXIT_FAILURE);
@@ -398,7 +404,7 @@ SOCKET bind_server_and_get_listen_socket(const char * ip, const char *port)
 
 SOCKET wait_for_client(SOCKET listener, fd_set * ttt_set)
 {
-    fd_set reads;       // to not modify the original copy
+    fd_set reads;
     FD_SET(listener, ttt_set);
     SOCKET max_socket = listener;
 
@@ -421,7 +427,7 @@ SOCKET wait_for_client(SOCKET listener, fd_set * ttt_set)
         FD_COPY(ttt_set, &reads);
         struct timeval timeout { .tv_sec = 0 , .tv_usec = 200000 /*microseconds*/ }; // 0.5 seconds
 
-        // we pass a timeout because we want don't select() to block
+        /* we pass a timeout because we want don't select() to block */
         if (select(max_socket+1, &reads, 0, 0, &timeout) < 0) 
         {
             std::cerr << "select() failed. " << GETSOCKETERRNO() << ' ';
@@ -435,8 +441,8 @@ SOCKET wait_for_client(SOCKET listener, fd_set * ttt_set)
             if(getchar() == EOF) return EOF;
             else 
             {
-                std::cin.ignore(100, '\n'); // flush any leftover input
-                std::cin.clear(); // clear any bad conditions set by std::cin
+                std::cin.ignore(100, '\n'); /* flush any leftover input */
+                std::cin.clear(); /* clear any bad conditions set by std::cin */
             }
         }
 
@@ -444,7 +450,7 @@ SOCKET wait_for_client(SOCKET listener, fd_set * ttt_set)
         {
             client = accept(listener, (struct sockaddr *)&client_sockaddr, &client_size);
 
-            //check for failed connection
+            /* check for failed connection */
             if (client == -1)
             {
                 std::cerr << "accept failed.";
@@ -452,36 +458,27 @@ SOCKET wait_for_client(SOCKET listener, fd_set * ttt_set)
                 continue;   
             }
 
-            //covert network to presentation (easy read)
+            /* covert network to presentation (easy read) */
             inet_ntop(AF_INET, &(client_sockaddr.sin_addr), ipv4, INET_ADDRSTRLEN);
             std::cout << "NEW CONNECTION FROM " << ipv4 << '\n';
         }
         
     } // while (!client)
 
-    FD_CLR(listener, ttt_set); // we no longer need to listen for it
+    FD_CLR(listener, ttt_set); /* we no longer need to listen for it */
 
     return client;
 }
 
-// for later use, adapting ipv4 and v6
-// provided by Beej from Beej's Guide
-void *get_in_addr(struct sockaddr *sa) 
-{
-    if (sa->sa_family == AF_INET)
-        return &(((struct sockaddr_in*)sa)->sin_addr);
-    else
-        return &(((struct sockaddr_in6*)sa)->sin6_addr);
-}
-
 unsigned send_to_client(SOCKET client_fd, enum SERVER_TO_CLIENT_TYPES type, std::string msg)
 {
+    /* for logging purposes */
     static const std::array<std::string, SERVER_TO_CLIENT_TYPES::SIZE> packet_type_name =
     { "REQUESTING_MOVE", "SENDING_MSG", "SENDING_BOARD", "INIT" };
     
     TYPE_LENGTH_DATA packet;
     memset(&packet, 0, sizeof(TYPE_LENGTH_DATA));
-    static int loop = 0; // for debugging
+    static int loop = 0; /* for debugging */
 
     /* so that the client knows what the server is requesting */
     packet.type = type;
@@ -501,11 +498,10 @@ unsigned send_to_client(SOCKET client_fd, enum SERVER_TO_CLIENT_TYPES type, std:
     
     packet.length = length;
     
-    // copying msg into packet.msg buffer
     for(unsigned long i = 0; i < length; i++)
         packet.payload.msg[i] = msg[i];
 
-    /* for debugging */
+    /* for debugging and logging */
     std::cout << "packet " << loop++ <<
     "\n[\n\t" << "type\t" << packet_type_name.at(packet.type - 1) <<
     "\n\t" << "length  " << std::to_string(length) <<
