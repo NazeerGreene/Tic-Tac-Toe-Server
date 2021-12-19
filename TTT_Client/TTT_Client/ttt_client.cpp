@@ -1,43 +1,57 @@
 #include "TTTNET.hpp"
 #include <iostream>
-
-// so we know how to interpret server messages (type-length-data)
-enum SERVER_TO_CLIENT_TYPES {REQUESTING_TAG = 1, REQUESTING_MOVE, SENDING_MSG };
-
-// so we can send our messages to the server (type-length-data)
-enum CLIENT_TO_SERVER_TYPES {SEND_TAG = 1, SEND_MOVE, ACK, TERMINATED = 200 };
+#include <string>
 
 // call to connect to TTT server given a ip and port.
 // exits program upon failure to create a socket or connect to server.
 SOCKET connect_to_ttt_server(std::string ip, std::string port);
 
 // to send a single packet to the server
-// big-endian: function will convert the move to network order
-unsigned send_to_server(SOCKET server, enum CLIENT_TO_SERVER_TYPES type, u_int32_t data);
+unsigned send_to_server(SOCKET server_fd, enum CLIENT_TO_SERVER_TYPES type, u_int8_t data);
+
+/*
+    Returns a string of the board in traditional 3x3 frame
+*/
+std::string format_board(const std::string board);
 
 // to ensure user enters a valid digit [1-9]
 unsigned convert_to_unsigned(std::string s);
 
 // get user input from stdin, continuously ask for board position
 // until int is entered, or EOF; [lower...upper] inclusive
-u_int32_t get_board_position(unsigned lower, unsigned upper);
+u_int32_t get_board_position(unsigned floor, unsigned ceiling);
+
+const std::string seperator = "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
+
+const std::string valid_spaces =
+    "|1 2 3 |\n"
+    "|4 5 6 | Valid Board Positions\n"
+    "|7 8 9 |\n";
+
+const std::string instructions =
+    "Enter a number between 1...9 & press [RETURN]\n";
 
 int main(int argc, char * argv[]) 
 {
-    // defaults for connecting to the server
+    /* defaults for connecting to the server */
     std::string TTT_ip {"127.0.0.1"};
     std::string TTT_port {"6767"};
 
-    if (argc > 1) // if other ip or port specified
+    if (argc > 1) /* if other ip or port specified */
     {
-        TTT_ip = argv[1]; // should be alterantive ip
+        TTT_ip = argv[1]; /* should be alterantive ip */
         if(argc > 2)
-            TTT_port = argv[2]; // should be alternative port
+            TTT_port = argv[2]; /* should be alternative port */
     }
 
     SOCKET server = connect_to_ttt_server(TTT_ip, TTT_port);
 
     unsigned move_from_player = 0;
+    
+    /* GAME INFORMATION SENT FROM SERVER (INIT) */
+    bool is_new_game = false;
+    char opponent = '\0';
+    char player   = '\0';
 
     /*
         There should be at most 2 sockets to listen for:
@@ -91,10 +105,31 @@ int main(int argc, char * argv[])
                 std::cout << "Connection closed by server.\n";
                 break; // from loop, end program
             }
-
-            // if the server is ready for a move
-            if (server_msg.type == SERVER_TO_CLIENT_TYPES::REQUESTING_MOVE)
+            
+            /* GAME INITIALIZATION */
+            if (server_msg.type == SERVER_TO_CLIENT_TYPES::INIT)
             {
+                char buff[3];
+                memset(buff, 0, 3); /* NULL termination guaranteed */
+                
+                /* 3x3 board 9 bytes in size */
+                if ( recv(server, buff, server_msg.length, 0) < 1) /* connection lost */
+                {
+                    std::cout << "Connection closed by server.\n";
+                    break; /* from loop, end program */
+                }
+                
+                is_new_game = true;
+                player    = buff[0];
+                opponent  = buff[1];
+            }
+
+            /* if the server is ready for a move */
+            else if (server_msg.type == SERVER_TO_CLIENT_TYPES::REQUESTING_MOVE)
+            {
+
+                std::cout << valid_spaces << instructions; /* to help the user */
+                
                 move_from_player = get_board_position(1,9);   // then get move from player
                 
                 if (move_from_player == EOF)
@@ -103,8 +138,29 @@ int main(int argc, char * argv[])
                     continue;
                 }
                 else if
-                    ( send_to_server(server, CLIENT_TO_SERVER_TYPES::SEND_MOVE , move_from_player-1) ) break; // break from game loop, end program, connection lost
+                    ( send_to_server(server, CLIENT_TO_SERVER_TYPES::SENDING_MOVE , move_from_player-1) ) break; // break from game loop, end program, connection lost
                 //user options [1...9] - 1 --> indexing [0..8]
+                
+                //std::cout << seperator;
+            }
+            
+            else if (server_msg.type == SERVER_TO_CLIENT_TYPES::SENDING_BOARD)
+            {
+                char buff[10];
+                memset(buff, 0, 10); /* NULL termination guaranteed */
+                
+                std::cout << seperator;
+                if (is_new_game)
+                    { std::cout << "\nNew Game!\n"; is_new_game = false; }
+                
+                /* 3x3 board 9 bytes in size */
+                if ( recv(server, buff, server_msg.length, 0) < 1) /* connection lost */
+                {
+                    std::cout << "Connection closed by server.\n";
+                    break; /* from loop, end program */
+                }
+                
+                std::cout << format_board(buff);
             }
 
             else if (server_msg.type == SERVER_TO_CLIENT_TYPES::SENDING_MSG)
@@ -121,7 +177,7 @@ int main(int argc, char * argv[])
                     break; // from loop, end program
                 }
 
-                std::cout << buff << std::endl; // display message from server (typically TTT board)
+                std::cout << buff << std::endl; // display message from server
             }
                         
             else { // if we don't know how to interpret, throw away the message
@@ -210,35 +266,25 @@ SOCKET connect_to_ttt_server(std::string ip, std::string port)
     return server;
 }
 
-unsigned send_to_server(SOCKET server, enum CLIENT_TO_SERVER_TYPES type, u_int32_t data)
+unsigned send_to_server(SOCKET server_fd, enum CLIENT_TO_SERVER_TYPES type, u_int8_t data)
 {
     TYPE_LENGTH_DATA packet;
     memset(&packet, 0, sizeof(packet));
+    //static int loop = 0; // for debugging
 
     /* so that the client knows what the server is requesting */
-    
-    switch (type) {
-        case CLIENT_TO_SERVER_TYPES::SEND_MOVE :
-            packet.type = CLIENT_TO_SERVER_TYPES::SEND_MOVE;
-            packet.length = 1; // we only need a byte to send the move
-            packet.payload[0] = data & 0xff;
-            // it's safe to cut off any data since we don't need more than a byte to send the move
-            break;
-        case CLIENT_TO_SERVER_TYPES::TERMINATED :
-            packet.type = CLIENT_TO_SERVER_TYPES::TERMINATED;
-            packet.length = 0;
-            break;
-        default:
-            packet.type = CLIENT_TO_SERVER_TYPES::ACK;
-            packet.length = 0;
-            break;
-    }
+    packet.type = type;
+    packet.length = 1;
+    packet.payload[0] = data;
 
-    //std::cout << "packet\n[\n\t" << "type\tSEND_MOVE\n\t" << "length  " << std::to_string(packet.length) <<
-    //"\n\tpayload " << char(packet.payload[0] + '0') << "\n]" << std::endl;
-
-    // send the data
-    ssize_t bytes_sent = send(server, &packet, 2 + packet.length, 0);
+    /* for debugging
+    std::cout << "packet " << loop++ <<
+    "\n[\n\t" << "type\t" << std::to_string(packet.type) <<
+    "\n\t" << "length  " << std::to_string(packet.length) <<
+    "\n\tpayload \"" << std::to_string(data) << "\"\n]" << std::endl;
+     */
+    /* send the data */
+    ssize_t bytes_sent = send(server_fd, &packet, 3, 0);
 
     if (bytes_sent < 1)
     {
@@ -247,6 +293,26 @@ unsigned send_to_server(SOCKET server, enum CLIENT_TO_SERVER_TYPES type, u_int32
     }
 
     return 0; // SUCCESS
+}
+
+std::string format_board(const std::string board)//(bool send_board = false)
+{
+    std::string out{""};
+
+    out = "-------------\n";
+    for(unsigned int i = 0; i < 9; i += 3)
+    {
+        out += "| ";
+        out += board.at(0 + i);
+        out += " | ";
+        out += board.at(1 + i);
+        out += " | ";
+        out += board.at(2 + i);
+        out += " |\n";
+    }
+    out += "-------------\n";
+
+    return out;
 }
 
 unsigned convert_to_unsigned(std::string s) 
@@ -267,7 +333,7 @@ unsigned convert_to_unsigned(std::string s)
     return d;
 }
 
-u_int32_t get_board_position(unsigned lower, unsigned upper)
+u_int32_t get_board_position(unsigned floor, unsigned ceiling)
 {
     std::string input = "";
     unsigned dig = 0;
@@ -290,11 +356,11 @@ u_int32_t get_board_position(unsigned lower, unsigned upper)
 
         dig = convert_to_unsigned(input);
 
-        if (lower <= dig and dig <= upper)
+        if (floor <= dig and dig <= ceiling)
             return dig;
         else
         {
-            std::cout << "Only [" << lower << "..." << upper << "]\n\n";
+            std::cout << "Only [" << floor << "..." << ceiling << "]\n\n";
             std::cin.clear();
         }
     }
