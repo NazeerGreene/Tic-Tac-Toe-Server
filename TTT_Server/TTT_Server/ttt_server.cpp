@@ -6,6 +6,7 @@
 #include "TTT_Controls.hpp"  /* for the TTT game itself */
 #include <iostream>
 #include <string>
+#include <array>
 
 // create and bind socket to local port; exits on failure;
 // purpose: to generate socket for listening
@@ -177,14 +178,19 @@ int main(int argc, char * argv[])
             status = send_to_client(player.fd, SERVER_TO_CLIENT_TYPES::SENDING_BOARD, game.board.data());
             status = send_to_client(player.fd, SERVER_TO_CLIENT_TYPES::REQUESTING_MOVE);
 
-
+            
             if (status == EOF)
             {
                 client_connection_closed = true;
             } /* nothing else to process */
+
             
             /* notify opponent so the game doesn't look frozen */
+            text  = "Waiting for ";
+            text += player.decorator;
+            text += " to make a move.\n";
             status = send_to_client(opponent.fd, SERVER_TO_CLIENT_TYPES::SENDING_BOARD, game.board.data());
+            status = send_to_client(opponent.fd, SERVER_TO_CLIENT_TYPES::SENDING_MSG, text);
 
             if (status == EOF)
             {
@@ -200,11 +206,12 @@ int main(int argc, char * argv[])
             TYPE_LENGTH_DATA client_msg;
             memset(&client_msg, 0, sizeof(TYPE_LENGTH_DATA)); // zero out
             
-            // we only want to look at the type and length first before any more operations on the sent data
+            /* we only want to look at the type and length first before any more operations on the sent data */
             ssize_t bytes_received = recv(player.fd, &client_msg, 2, 0);
-            std::cout << "Received: " << bytes_received << " from client" << std::endl;
-
-            if (bytes_received < 1) // connection lost
+            std::cout << "Received " << bytes_received << " from client " << player.decorator << " (fd: " << player.fd << ")\n";
+            if ( client_msg.length ) bytes_received = recv(player.fd, client_msg.payload.msg, client_msg.length, 0);
+            
+            if ( bytes_received < 1) // connection lost
             {
                 std::cout << "Connection closed by client (FD_ISSET).\n";
                 client_connection_closed = true; /* reset game and get new client */
@@ -213,27 +220,17 @@ int main(int argc, char * argv[])
             if ( client_msg.type == CLIENT_TO_SERVER_TYPES::SENDING_MOVE
                 && next_move_belongs_to == i )
             {
-                u_int8_t move = 0;
-                ssize_t bytes_received = recv(player.fd, &move, 1, 0);
-                
-                if (bytes_received < 1) // connection lost
-                {
-                    std::cout << "Connection closed by client (RECEIVING_MOVE).\n";
-                    client_connection_closed = true; /* reset game and get new client */
-                }
+                u_int8_t move = client_msg.payload.data;
                 
                 /* put player move onto board */
                 bool valid_move = player_move(move, player.decorator, game);
 
                 if (valid_move)
-                {
-                    // switch turns
-                    next_move_belongs_to = !next_move_belongs_to;
-                }
+                { next_move_belongs_to = !next_move_belongs_to; /* switch turns */ }
                 else 
                 {
-                    text = "Previous move: " + std::to_string(move+1) + " was not a valid move.\n";
-                    if ( send_to_client(player.fd, SERVER_TO_CLIENT_TYPES::SENDING_MSG, text) ) client_connection_closed = true;
+                    text = "PREVIOUS MOVE: " + std::to_string(move+1) + " WAS NOT A VALID MOVE.\n";
+                    client_connection_closed = send_to_client(player.fd, SERVER_TO_CLIENT_TYPES::SENDING_MSG, text);
                 }
                 
                 /* we will need a new move whether it's from the opponent or the player (because of a faulty previous move). */
@@ -243,22 +240,13 @@ int main(int argc, char * argv[])
 
             else if ( client_msg.type == CLIENT_TO_SERVER_TYPES::TERMINATED )
             {
-                std::cout << "Recieved TERMINATED flag from client, closing connection with client.\n";
+                std::cout << "Received TERMINATED flag from client, closing connection with client.\n";
+                send_to_client(player.fd, SERVER_TO_CLIENT_TYPES::SENDING_MSG, "Thank you for playing!\n");
                 client_connection_closed = true; /* reset game and get new client */
 
             } // CLIENT_TO_SERVER_TYPES::TERMINATED
             
-            else { // if we don't know how to interpret, throw away the message
-                
-                char garbage[256];
-                ssize_t bytes_received = recv(player.fd, &garbage, client_msg.length, 0);
-                
-                if (bytes_received < 1) // connection lost
-                {
-                    std::cout << "Connection closed by client (garbage).\n";
-                    client_connection_closed = true; /* reset game and get new client */
-                }
-            } // else
+            else {} /* if we don't know how to interpret, throw away the message */
 
         } // FD_ISSET(client, &reads)
 
@@ -269,7 +257,7 @@ int main(int argc, char * argv[])
             clear_board(game); /* restart game values: board, turns, player_turn = true */
             text.clear();
 
-            next_move_belongs_to = 1; /* will toggle at top of loop */
+            next_move_belongs_to = !i; /* will toggle at top of loop */
 
             should_request_move = true;
 
@@ -298,14 +286,12 @@ int main(int argc, char * argv[])
 
         bool game_over = false;
         
-        if (winner == game.empty_space && game.turns_left == 0) // no winner and game over
+        if (winner == game.empty_space && game.turns_left == 0) /* no winner and game over */
         {
-            text = "It's a draw!\n";
-                    
+            text = "\nIt's a draw!\n";
             game_over = true;
-            
-        } 
-        else if (winner != game.empty_space) // there is a winner and game over
+        }
+        else if (winner != game.empty_space) /* there is a winner and game over */
         { 
             text  = "\n\n~~~Player ";
             text += winner;
@@ -449,7 +435,7 @@ SOCKET wait_for_client(SOCKET listener, fd_set * ttt_set)
             if(getchar() == EOF) return EOF;
             else 
             {
-                std::cin.ignore(1000, '\n'); // flush any leftover input
+                std::cin.ignore(100, '\n'); // flush any leftover input
                 std::cin.clear(); // clear any bad conditions set by std::cin
             }
         }
@@ -488,19 +474,22 @@ void *get_in_addr(struct sockaddr *sa)
         return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-unsigned send_to_client(SOCKET client_fd, enum SERVER_TO_CLIENT_TYPES type, std::string data)
+unsigned send_to_client(SOCKET client_fd, enum SERVER_TO_CLIENT_TYPES type, std::string msg)
 {
+    static const std::array<std::string, SERVER_TO_CLIENT_TYPES::SIZE> packet_type_name =
+    { "REQUESTING_MOVE", "SENDING_MSG", "SENDING_BOARD", "INIT" };
+    
     TYPE_LENGTH_DATA packet;
-    memset(&packet, 0, sizeof(packet));
+    memset(&packet, 0, sizeof(TYPE_LENGTH_DATA));
     static int loop = 0; // for debugging
 
     /* so that the client knows what the server is requesting */
     packet.type = type;
     
     /* to reduce the size in case c++11 allocated more than necessary */
-    data.shrink_to_fit();
+    msg.shrink_to_fit();
 
-    unsigned long length = data.length();
+    unsigned long length = msg.length();
 
     if (length > 255)
     {
@@ -509,24 +498,25 @@ unsigned send_to_client(SOCKET client_fd, enum SERVER_TO_CLIENT_TYPES type, std:
 
         return -2;
     }
-
-    packet.length = length & 0xff;
-
+    
+    packet.length = length;
+    
     // copying msg into packet.msg buffer
-    for(unsigned long i = 0; i < length; i++)    packet.payload[i] = data[i];
+    for(unsigned long i = 0; i < length; i++)
+        packet.payload.msg[i] = msg[i];
 
     /* for debugging */
     std::cout << "packet " << loop++ <<
-    "\n[\n\t" << "type\t" << std::to_string(packet.type) <<
+    "\n[\n\t" << "type\t" << packet_type_name.at(packet.type - 1) <<
     "\n\t" << "length  " << std::to_string(length) <<
-    "\n\tpayload \"" << data << "\"\n]" << std::endl;
+    "\n\tpayload \"" << msg << "\"\n]" << std::endl;
 
     /* send the data */
     ssize_t bytes_sent = send(client_fd, &packet, 2 + packet.length, 0);
 
     if (bytes_sent < 1)
     {
-        std::cerr << "Lost connection with server" << std::endl;
+        std::cerr << "Lost connection with client" << std::endl;
         return EOF;
     }
 

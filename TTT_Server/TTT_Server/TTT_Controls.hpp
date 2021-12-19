@@ -40,16 +40,6 @@
 
     } GAMESTATE;
 
-    //-----------helpers-----------
-    const std::string valid_spaces = 
-        "1 2 3\n"
-        "4 5 6\n"
-        "7 8 9\n";
-
-    const std::string instructions =
-        "Enter a number between 1...9 & press [RETURN]\n";
-
-
     /*
         Default board decorators for the player, the opponent, and the empty space.
         See definitions at top of header. Ex DEFAULT_PLAYER_CHAR

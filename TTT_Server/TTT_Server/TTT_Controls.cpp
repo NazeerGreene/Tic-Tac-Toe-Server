@@ -46,27 +46,6 @@ bool player_move(const unsigned move, const char decorator, GAMESTATE& game)
     return false;
 }
 
-/*
-std::string format_board(const GAMESTATE& game)//(bool send_board = false)
-{
-    std::string out{""};
-
-    out = "-------------\n";
-    for(unsigned int i = 0; i < 9; i += 3)
-    {
-        out += "| ";
-        out += game.board.at(0 + i);
-        out += " | ";
-        out += game.board.at(1 + i);
-        out += " | ";
-        out += game.board.at(2 + i);
-        out += " |\n";
-    }
-    out += "-------------\n";
-
-    return out;
-}*/
-
 void clear_board(GAMESTATE& game) 
 {
     //reset to defaults
