@@ -94,34 +94,25 @@ int main(int argc, char * argv[])
         // wait until server is ready 
         if (FD_ISSET(server, &reads)) 
         {
-            //std::cout << "server ready for data\n";
-
             TYPE_LENGTH_DATA server_msg;
             memset(&server_msg, 0, sizeof(TYPE_LENGTH_DATA)); // zero out
             
-            // we only want to look at the type and length first before any more operations on the sent data
-            if ( recv(server, &server_msg, 2, 0) < 1) // connection lost
+            /* we only want to look at the type and length first before any more operations on the sent data */
+            ssize_t bytes_received = recv(server, &server_msg, 2, 0);
+            if ( server_msg.length ) bytes_received = recv(server, server_msg.payload.msg, server_msg.length, 0);
+            
+            if ( bytes_received < 1) // connection lost
             {
-                std::cout << "Connection closed by server.\n";
+                std::cout << "Connection closed by server (receiving payload).\n";
                 break; // from loop, end program
             }
             
             /* GAME INITIALIZATION */
             if (server_msg.type == SERVER_TO_CLIENT_TYPES::INIT)
             {
-                char buff[3];
-                memset(buff, 0, 3); /* NULL termination guaranteed */
-                
-                /* 3x3 board 9 bytes in size */
-                if ( recv(server, buff, server_msg.length, 0) < 1) /* connection lost */
-                {
-                    std::cout << "Connection closed by server.\n";
-                    break; /* from loop, end program */
-                }
-                
                 is_new_game = true;
-                player    = buff[0];
-                opponent  = buff[1];
+                player    = server_msg.payload.msg[0];
+                opponent  = server_msg.payload.msg[1];
             }
 
             /* if the server is ready for a move */
@@ -138,60 +129,36 @@ int main(int argc, char * argv[])
                     continue;
                 }
                 else if
-                    ( send_to_server(server, CLIENT_TO_SERVER_TYPES::SENDING_MOVE , move_from_player-1) ) break; // break from game loop, end program, connection lost
-                //user options [1...9] - 1 --> indexing [0..8]
+                    ( send_to_server(server, CLIENT_TO_SERVER_TYPES::SENDING_MOVE , move_from_player-1) ) break;
+                /* break from game loop, end program, connection lost
+                   user options [1...9] - 1 --> indexing [0..8]  */
                 
                 //std::cout << seperator;
             }
             
             else if (server_msg.type == SERVER_TO_CLIENT_TYPES::SENDING_BOARD)
             {
-                char buff[10];
-                memset(buff, 0, 10); /* NULL termination guaranteed */
-                
                 std::cout << seperator;
+                std::cout << "You're player " << player << '\n';
                 if (is_new_game)
                     { std::cout << "\nNew Game!\n"; is_new_game = false; }
+                else
+                    std::cout << std::endl;
                 
                 /* 3x3 board 9 bytes in size */
-                if ( recv(server, buff, server_msg.length, 0) < 1) /* connection lost */
-                {
-                    std::cout << "Connection closed by server.\n";
-                    break; /* from loop, end program */
-                }
-                
-                std::cout << format_board(buff);
+                std::cout << format_board(server_msg.payload.msg);
             }
 
             else if (server_msg.type == SERVER_TO_CLIENT_TYPES::SENDING_MSG)
             {
-                char buff[256];
-                memset(buff, 0, 256); // zero out
+                //char buff[256];
+                //memset(buff, 0, 256); // zero out
                 // guaranteed null termination since TYPE_LENGTH_DATA::length < 256
 
-                ssize_t bytes_received = recv(server, &buff, server_msg.length, 0);
-                
-                if (bytes_received < 1) // connection lost
-                {
-                    std::cout << "Connection closed by server.\n";
-                    break; // from loop, end program
-                }
-
-                std::cout << buff << std::endl; // display message from server
+                std::cout << server_msg.payload.msg << std::endl; // display message from server
             }
                         
-            else { // if we don't know how to interpret, throw away the message
-                
-                char garbage[256];
-                ssize_t bytes_received = recv(server, &garbage, server_msg.length, 0);
-                
-                if (bytes_received < 1) // connection lost
-                {
-                    std::cout << "Connection closed by server.\n";
-                    break; // from loop, end program
-                }
-                
-            } // else
+            else {} /* if we don't know how to interpret, throw away the messagev*/
 
         } // FD_ISSET(server, &reads)
     } // while
@@ -275,7 +242,7 @@ unsigned send_to_server(SOCKET server_fd, enum CLIENT_TO_SERVER_TYPES type, u_in
     /* so that the client knows what the server is requesting */
     packet.type = type;
     packet.length = 1;
-    packet.payload[0] = data;
+    packet.payload.data = data;
 
     /* for debugging
     std::cout << "packet " << loop++ <<
@@ -297,6 +264,8 @@ unsigned send_to_server(SOCKET server_fd, enum CLIENT_TO_SERVER_TYPES type, u_in
 
 std::string format_board(const std::string board)//(bool send_board = false)
 {
+    if (board.size() < 9) return "Board too small to generate.\n";
+    
     std::string out{""};
 
     out = "-------------\n";
@@ -339,7 +308,7 @@ u_int32_t get_board_position(unsigned floor, unsigned ceiling)
     unsigned dig = 0;
     while(1) 
     {
-        std::cout << "Choose a space >> ";
+        std::cout << "Choose a position >> ";
         std::getline(std::cin, input);
 
         if (std::cin.eof())
