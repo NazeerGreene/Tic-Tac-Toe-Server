@@ -4,6 +4,6 @@ Server Usage: server.out
 Client Usage: client.out [optional: IPv4 addr] [optional: port] (only default port works)
 
 Notes:
-There is code in the files that I haven't used because (should time allow it) I want to build upon the features of the program. Also, for some reason the select in server.cpp is weird when it comes to stdin, I'm trying to fix that. My client handles erroneous input before it sends to the server, but if the server receives the wrong input then it won't advance a turn until the input is correct (though there might be edge cases). 
-
-Ctrl-D on the client to close the connection. It might not show it on the server, but once the server loses a connection it will search for another one. I'm fixing that, too. 
+1.  There is code present that isn't used. It is for future updates and new features.
+2.  There will be noticable glitches if client one disconnects before client two connects (during the initial connection), it is the only major glitch when connectioning clients.
+3.  It is not technically necessary for the client to send a formal termanitation to the server, that is there for any future plans.
